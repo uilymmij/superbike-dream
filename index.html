@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>私密記帳本 — Face ID 強制登入（v3）</title>
+<title>私密記帳本 — Face ID 多功能版 (v4)</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#2563eb">
 <style>
@@ -11,7 +11,7 @@
 @media (prefers-color-scheme: dark){:root{--bg:#0b1220;--fg:#e5e7eb;--muted:#9aa6b2;--border:#1f2937;--card:#0f172a}}
 *{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans TC",Arial;background:var(--bg);color:var(--fg);line-height:1.6}
 .container{max-width:880px;margin:0 auto;padding:16px}
-.card{background:var(--card);border:1px solid var(--border);padding:12px;border-radius:12px}
+.card{background:var(--card);border:1px solid var(--border);padding:12px;border-radius:12px;margin-top:12px}
 h1{margin:0 0 8px;font-size:20px}
 .small{font-size:13px;color:var(--muted)}
 .toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px}
@@ -19,28 +19,26 @@ button{padding:8px 12px;border-radius:10px;border:1px solid var(--border);backgr
 button.primary{background:var(--brand);color:#fff;border-color:var(--brand)}
 button.accent{background:var(--accent);color:#001;border-color:var(--accent)}
 button.danger{background:var(--danger);color:#fff;border-color:var(--danger)}
-.badge{font-size:12px;padding:4px 8px;border-radius:999px;background:var(--border);color:var(--muted)}
-.progress{height:12px;background:var(--border);border-radius:999px;overflow:hidden;margin-top:8px}
-.progress>span{display:block;height:100%;background:var(--accent);width:0%}
-.note{font-size:13px;color:var(--muted);margin-top:8px}
+.progress{height:12px;background:var(--border);border-radius:999px;overflow:hidden;margin-top:8px;position:relative}
+.progress>span{display:block;height:100%;background:var(--accent);width:0%;transition:width 0.3s}
+.progress label{position:absolute;right:6px;top:-2px;font-size:12px;color:var(--fg)}
 .row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
 input,select{padding:8px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--fg)}
-.smallbtn{font-size:13px;padding:6px 8px;border-radius:8px}
+.note{font-size:13px;color:var(--muted);margin-top:8px}
 .hidden{display:none}
 #jsStatus{font-size:12px;padding:4px 8px;border-radius:8px;background:#eee;color:#333}
+.listitem{display:flex;justify-content:space-between;align-items:center;margin-top:4px;padding:4px 0;border-bottom:1px solid var(--border)}
+.smallbtn{font-size:13px;padding:6px 8px;border-radius:8px}
 </style>
-<noscript><div style="padding:12px;color:#fff;background:#dc2626">此頁需要 JavaScript 才能運作，請在 Safari 允許 JS。</div></noscript>
 </head>
 <body>
 <div class="container">
   <div class="card" id="intro">
-    <h1>superbike-dream <span class="small">（v3）</span></h1>
+    <h1>superbike-dream <span class="small">(v4)</span></h1>
     <div class="toolbar">
       <span id="jsStatus">JS 檢查中…</span>
-      <span class="badge" id="authStatus">未註冊</span>
-      <button id="btnDebug" class="smallbtn">Debug：我能跳出提示嗎？</button>
+      <button id="btnDebug" class="smallbtn">Debug</button>
     </div>
-    <p class="small">本頁使用 WebAuthn（Face ID/Touch ID）作為本機解鎖，必須驗證後才能進入。</p>
     <div class="toolbar">
       <button id="btnRegister" class="primary">啟用 Face ID（註冊）</button>
       <button id="btnLogin" class="accent hidden">使用 Face ID 登入</button>
@@ -48,120 +46,178 @@ input,select{padding:8px;border-radius:8px;border:1px solid var(--border);backgr
   </div>
 
   <div id="app" class="card hidden" aria-hidden="true">
+    <h2 style="margin-top:0">記帳區</h2>
     <div class="small">目標：<span id="targetShow">300000</span>　累積存款：<strong id="savedTotal">0</strong></div>
-    <div class="progress"><span id="bar"></span></div>
-    <div class="row" style="margin-top:12px">
+    <div class="progress"><span id="bar"></span><label id="barpct"></label></div>
+
+    <div class="row">
       <div><label>月份</label><input id="monthPick" type="month"></div>
-      <div><label>本月起始金額</label><input id="start" type="number" inputmode="decimal" placeholder="12000"></div>
+      <div><label>起始金額</label><input id="start" type="number"></div>
     </div>
     <div class="row">
+      <div><label>預計開銷</label><input id="plan" type="number" placeholder="輸入後會鎖定"></div>
       <div><label>類型</label><select id="type"><option value="expense">支出</option><option value="income">收入</option></select></div>
-      <div><label>金額</label><input id="amount" type="number" inputmode="decimal"></div>
     </div>
     <div class="row">
-      <div><input id="cat" placeholder="分類"></div>
-      <div><input id="note" placeholder="備註"></div>
+      <div><label>分類</label><select id="cat"></select></div>
+      <div><label>金額</label><input id="amount" type="number"></div>
     </div>
-    <div class="toolbar"><button id="btnAdd" class="primary">加入</button><button id="btnExport" class="smallbtn">匯出 JSON</button><button id="btnLock" class="smallbtn">上鎖</button></div>
-    <div style="margin-top:12px"><strong>本月明細</strong><div id="listArea" class="note"></div></div>
+    <div><input id="note" placeholder="備註"></div>
+    <div class="toolbar"><button id="btnAdd" class="primary">加入</button><button id="btnExport" class="smallbtn">匯出</button><button id="btnLock" class="smallbtn">上鎖</button></div>
+
+    <div class="note" id="summary"></div>
+    <div style="margin-top:12px"><strong>本月明細</strong><div id="listArea"></div></div>
+  </div>
+
+  <div id="debt" class="card hidden" aria-hidden="true">
+    <h2 style="margin-top:0">欠款紀錄</h2>
+    <div class="row"><div><input id="debtor" placeholder="姓名"></div><div><input id="debtamt" type="number" placeholder="金額"></div></div>
+    <div class="toolbar"><button id="btnAddDebt" class="primary">加入</button></div>
+    <div id="debtList"></div>
   </div>
 </div>
 
 <script>
 (function(){
-  const $ = s=>document.querySelector(s);
-  const jsStatus = $('#jsStatus');
-  jsStatus.textContent = 'JS 已啟動 ✅';
+const $=s=>document.querySelector(s);
+let DB={version:4,target:300000,months:{},debts:[]};
+const STORAGE_KEY='nbudget.v4';
+function save(){localStorage.setItem(STORAGE_KEY,JSON.stringify(DB));}
+function load(){const s=localStorage.getItem(STORAGE_KEY);if(s){try{DB=JSON.parse(s);}catch(e){}}}
+function ym(d=new Date()){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');}
+function daysInMonth(y,m){return new Date(y, m, 0).getDate();} // m: 1-12
+function ensureMonth(k){if(!DB.months[k])DB.months[k]={start:0,plan:null,entries:[],counter:0};return DB.months[k];}
+function statsAll(){return Object.keys(DB.months).reduce((s,k)=>{const m=DB.months[k];const inc=(m.entries||[]).filter(x=>x.type==='income').reduce((a,b)=>a+b.amount,0);const exp=(m.entries||[]).filter(x=>x.type==='expense').reduce((a,b)=>a+b.amount,0);return s+((m.start||0)+inc-exp);},0);}
 
-  const STORAGE_KEY='nbudget.v3';
-  let DB={version:3,target:300000,months:{}};
-  function save(){localStorage.setItem(STORAGE_KEY,JSON.stringify(DB));}
-  function load(){const s=localStorage.getItem(STORAGE_KEY);if(s){try{DB=JSON.parse(s);}catch(e){}}}
-  function ym(d=new Date()){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');}
-  function ensureMonth(k){if(!DB.months[k])DB.months[k]={start:0,entries:[],counter:0};return DB.months[k];}
-  function statsAll(){return Object.keys(DB.months).reduce((s,k)=>{const m=DB.months[k];const inc=(m.entries||[]).filter(x=>x.type==='income').reduce((a,b)=>a+b.amount,0);const exp=(m.entries||[]).filter(x=>x.type==='expense').reduce((a,b)=>a+b.amount,0);return s+((m.start||0)+inc-exp);},0);}
+function supported(){return !!(window.PublicKeyCredential&&navigator.credentials);}
+function hasCred(){return !!localStorage.getItem('webauthn.cred');}
+function toB64U(buf){return btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');}
+function fromB64U(s){s=s.replace(/-/g,'+').replace(/_/g,'/');while(s.length%4)s+='=';const b=atob(s);const a=new Uint8Array(b.length);for(let i=0;i<b.length;i++)a[i]=b.charCodeAt(i);return a.buffer;}
+function rnd(n=32){const b=new Uint8Array(n);crypto.getRandomValues(b);return b.buffer;}
 
-  function supported(){return !!(window.PublicKeyCredential&&navigator.credentials);}
-  function hasCred(){return !!localStorage.getItem('webauthn.cred');}
-  function toB64U(buf){return btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');}
-  function fromB64U(s){s=s.replace(/-/g,'+').replace(/_/g,'/');while(s.length%4)s+='=';const b=atob(s);const a=new Uint8Array(b.length);for(let i=0;i<b.length;i++)a[i]=b.charCodeAt(i);return a.buffer;}
-  function rnd(n=32){const b=new Uint8Array(n);crypto.getRandomValues(b);return b.buffer;}
+async function register(){const userId=new Uint8Array(16);crypto.getRandomValues(userId);
+const publicKey={rp:{name:'PrivateBudget'},user:{id:userId,name:'local-user',displayName:'Local User'},pubKeyCredParams:[{type:'public-key',alg:-7}],authenticatorSelection:{authenticatorAttachment:'platform',userVerification:'required',residentKey:'required'},timeout:60000,challenge:new Uint8Array(rnd(32))};
+const cred=await navigator.credentials.create({publicKey});const rawId=new Uint8Array(cred.rawId);
+localStorage.setItem('webauthn.cred',toB64U(rawId));}
+async function login(){const idb64=localStorage.getItem('webauthn.cred');const allow=[{id:new Uint8Array(fromB64U(idb64)),type:'public-key',transports:['internal']}];
+const publicKey={challenge:new Uint8Array(rnd(32)),allowCredentials:allow,timeout:60000,userVerification:'required'};
+await navigator.credentials.get({publicKey});}
 
-  async function register(){
-    if(!supported())throw new Error('此裝置不支援 WebAuthn');
-    const userId=new Uint8Array(16);crypto.getRandomValues(userId);
-    const publicKey={rp:{name:'PrivateBudget'},user:{id:userId,name:'local-user',displayName:'Local User'},pubKeyCredParams:[{type:'public-key',alg:-7}],authenticatorSelection:{authenticatorAttachment:'platform',userVerification:'required',residentKey:'required'},timeout:60000,challenge:new Uint8Array(rnd(32))};
-    const cred=await navigator.credentials.create({publicKey});
-    const rawId=new Uint8Array(cred.rawId);
-    localStorage.setItem('webauthn.cred',toB64U(rawId));
-    return true;
-  }
-  async function login(){
-    if(!supported())throw new Error('此裝置不支援 WebAuthn');
-    const idb64=localStorage.getItem('webauthn.cred');if(!idb64)throw new Error('尚未註冊');
-    const allow=[{id:new Uint8Array(fromB64U(idb64)),type:'public-key',transports:['internal']}];
-    const publicKey={challenge:new Uint8Array(rnd(32)),allowCredentials:allow,timeout:60000,userVerification:'required'};
-    await navigator.credentials.get({publicKey});
-    return true;
-  }
+function renderCats(){
+ const c=$('#cat'); c.innerHTML='';
+ const type=$('#type').value;
+ const opts= type==='expense'?['保齡球','機車','食物','其他']:['媽媽的愛','工資'];
+ opts.forEach(x=>{const o=document.createElement('option');o.value=x;o.textContent=x;c.appendChild(o);});
+}
 
-  function render(){
-    $('#targetShow').textContent=DB.target;
-    const total=statsAll();
-    $('#savedTotal').textContent=total.toLocaleString();
-    const pct=Math.max(0,Math.min(100,DB.target?(total/DB.target*100):0));
-    $('#bar').style.width=pct+'%';
-    const mkey=$('#monthPick').value||ym();
-    $('#monthPick').value=mkey;
-    const m=ensureMonth(mkey);
-    $('#start').value=m.start||'';
-    const list=$('#listArea');list.innerHTML='';
-    (m.entries||[]).slice().reverse().forEach(e=>{
-      const div=document.createElement('div');
-      div.textContent=`${e.type==='income'?'收入':'支出'} · ${e.cat||'(未分類)'} · ${e.amount} — ${e.note||''}`;
-      list.appendChild(div);
-    });
-  }
-  function openApp(){ $('#intro').classList.add('hidden'); $('#app').classList.remove('hidden'); $('#app').ariaHidden='false'; render(); resetIdleTimer(); }
-  function lockApp(){ $('#intro').classList.remove('hidden'); $('#app').classList.add('hidden'); $('#app').ariaHidden='true'; clearTimeout(idleTimer); }
+function render(){
+ const mkey=$('#monthPick').value||ym(); const m=ensureMonth(mkey);
+ const total=statsAll();
+ $('#targetShow').textContent=DB.target;
+ $('#savedTotal').textContent=total.toLocaleString();
+ const pct=DB.target?Math.min(100,(total/DB.target*100)):0;
+ $('#bar').style.width=pct+'%'; $('#barpct').textContent=pct.toFixed(1)+'%';
+ $('#start').value=m.start||'';
+ $('#plan').value=m.plan!==null?m.plan:'';
+ $('#plan').disabled = (m.plan!==null); // locked after confirm
+ const entries=m.entries||[];
+ const exp=entries.filter(x=>x.type==='expense').reduce((a,b)=>a+b.amount,0);
+ const inc=entries.filter(x=>x.type==='income').reduce((a,b)=>a+b.amount,0);
 
-  let idleTimer=null;
-  function resetIdleTimer(){ clearTimeout(idleTimer); idleTimer=setTimeout(()=>{alert('閒置超過 3 分鐘，已自動上鎖'); lockApp();},3*60*1000); }
+ // average daily: if selected month is current month => use today's date; else use full days in that month
+ const [yy,mm]=mkey.split('-').map(Number);
+ const mIsCurrent = (mkey === ym());
+ const days = mIsCurrent ? (new Date()).getDate() : new Date(yy, mm, 0).getDate();
+ const avg = days ? Math.round(exp/days) : 0;
 
-  window.addEventListener('DOMContentLoaded',function(){
-    jsStatus.textContent='JS 執行中（可互動） ✅';
-    load();
+ // last month diff: (last balance) - (last plan)
+ const keys = Object.keys(DB.months).sort(); // ascending
+ const idx = keys.indexOf(mkey);
+ let lastDiff = '無上月資料';
+ if (idx>0) {
+   const lastKey = keys[idx-1];
+   const last = DB.months[lastKey] || {start:0, entries:[], plan:null};
+   const le=(last.entries||[]).filter(x=>x.type==='expense').reduce((a,b)=>a+b.amount,0);
+   const li=(last.entries||[]).filter(x=>x.type==='income').reduce((a,b)=>a+b.amount,0);
+   const bal=(last.start||0)+li-le;
+   if(last.plan!==null){
+     const d=bal - last.plan;
+     lastDiff = (d>=0?'節省':'超支') + Math.abs(Math.round(d)) + '元';
+   } else {
+     lastDiff = '上月未設定預計開銷';
+   }
+ }
 
-    $('#btnDebug').addEventListener('click',()=>alert('JS 正常，按鈕有反應 ✅'));
+ const diffPlan = (m.plan!==null) ? (exp - m.plan) : null;
+ const planLine = (m.plan!==null) ? ('預計：'+m.plan+'　已用 '+(exp/m.plan*100).toFixed(1)+'%　差額：'+Math.round(diffPlan)) : '尚未設定預計開銷';
 
-    if(supported()){ $('#authStatus').textContent=hasCred()?'已註冊 Passkey':'可用：Face ID/Touch ID'; }
-    else { $('#authStatus').textContent='此裝置不支援 WebAuthn'; }
+ $('#summary').innerHTML = `本月支出：${exp}　平均每日開銷：${avg}　${planLine}<br>上月差額：${lastDiff}`;
 
-    $('#btnRegister').addEventListener('click',async()=>{
-      try{await register();$('#authStatus').textContent='註冊成功';$('#btnLogin').classList.remove('hidden');alert('已啟用 Face ID，請改用「使用 Face ID 登入」。');}
-      catch(e){alert('註冊失敗：'+e.message);} });
+ const list=$('#listArea');list.innerHTML='';
+ entries.slice().reverse().forEach(e=>{
+   const div=document.createElement('div');div.className='listitem';
+   div.innerHTML=`<span>${e.type==='income'?'收入':'支出'} · ${e.cat||'(未分類)'} · ${e.amount} — ${e.note||''}</span><button class="danger smallbtn" data-id="${e.id}">🗑️</button>`;
+   list.appendChild(div);
+ });
+ list.querySelectorAll('button[data-id]').forEach(btn=>btn.addEventListener('click',ev=>{
+   const id=parseInt(ev.target.dataset.id);m.entries=m.entries.filter(x=>x.id!==id);save();render();
+ }));
 
-    $('#btnLogin').addEventListener('click',async()=>{
-      try{await login();openApp();}catch(e){alert('驗證失敗：'+e.message);} });
+ renderDebt();
+}
 
-    $('#monthPick').value=ym();
-    $('#monthPick').addEventListener('change',()=>{render();resetIdleTimer();});
-    $('#start').addEventListener('change',()=>{const v=parseFloat($('#start').value||'0');const m=ensureMonth($('#monthPick').value||ym());m.start=isFinite(v)?v:0;save();render();resetIdleTimer();});
-    $('#btnAdd').addEventListener('click',()=>{
-      const m=ensureMonth($('#monthPick').value||ym());
-      const a=parseFloat($('#amount').value||'0');if(!isFinite(a)||a<=0){alert('金額需為正數');return;}
-      const e={id:++m.counter,type:$('#type').value,amount:a,cat:($('#cat').value||'').trim(),note:($('#note').value||'').trim(),ts:Date.now()};
-      m.entries.push(e);save();render();$('#amount').value='';$('#note').value='';resetIdleTimer();
-    });
-    $('#btnExport').addEventListener('click',()=>{
-      const blob=new Blob([JSON.stringify(DB,null,2)],{type:'application/json'});
-      const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='budget-backup.json';a.click();resetIdleTimer();
-    });
-    $('#btnLock').addEventListener('click',()=>{lockApp();});
-    document.body.addEventListener('click',resetIdleTimer);
-    document.body.addEventListener('keydown',resetIdleTimer);
-  });
+function renderDebt(){
+ const dlist=$('#debtList'); dlist.innerHTML='';
+ DB.debts.forEach((d,i)=>{
+  const div=document.createElement('div');div.className='listitem';
+  div.innerHTML=`<span>${d.name} — ${d.amount}元</span><button class="danger smallbtn" data-i="${i}">🗑️</button>`;
+  dlist.appendChild(div);
+ });
+ dlist.querySelectorAll('button[data-i]').forEach(b=>b.addEventListener('click',ev=>{
+  const i=parseInt(ev.target.dataset.i);DB.debts.splice(i,1);save();renderDebt();
+ }));
+}
+
+function openApp(){ $('#intro').classList.add('hidden'); $('#app').classList.remove('hidden'); $('#debt').classList.remove('hidden'); render(); resetIdle(); }
+function lockApp(){ $('#intro').classList.remove('hidden'); $('#app').classList.add('hidden'); $('#debt').classList.add('hidden'); clearTimeout(idleTimer); }
+let idleTimer=null; function resetIdle(){ clearTimeout(idleTimer); idleTimer=setTimeout(()=>{alert('閒置超過3分鐘，已自動上鎖'); lockApp();},3*60*1000);}
+
+function renderCats(){
+ const c=$('#cat'); c.innerHTML='';
+ const type=$('#type').value;
+ const opts= type==='expense'?['保齡球','機車','食物','其他']:['媽媽的愛','工資'];
+ opts.forEach(x=>{const o=document.createElement('option');o.value=x;o.textContent=x;c.appendChild(o);});
+}
+
+function wire(){
+ $('#btnDebug').addEventListener('click',()=>alert('JS 正常 ✅'));
+ $('#btnRegister').addEventListener('click',async()=>{try{await register();$('#btnLogin').classList.remove('hidden');alert('註冊成功');}catch(e){alert(e.message);}});
+ $('#btnLogin').addEventListener('click',async()=>{try{await login();openApp();}catch(e){alert(e.message);}});
+
+ $('#type').addEventListener('change',()=>{renderCats();});
+ $('#monthPick').value=ym(); $('#monthPick').addEventListener('change',()=>{render();resetIdle();});
+ $('#start').addEventListener('change',()=>{const v=parseFloat($('#start').value||'0');const m=ensureMonth($('#monthPick').value||ym());m.start=isFinite(v)?v:0;save();render();});
+ $('#plan').addEventListener('change',()=>{const v=parseFloat($('#plan').value||'0');if(!isFinite(v)||v<=0){alert('請輸入正確金額');return;}if(confirm('設定預計開銷 '+v+' 元？確定後將鎖定不可修改。')){const m=ensureMonth($('#monthPick').value||ym());m.plan=v;$('#plan').disabled=true;save();render();}else{$('#plan').value='';}});
+ $('#btnAdd').addEventListener('click',()=>{
+  const m=ensureMonth($('#monthPick').value||ym());
+  const a=parseFloat($('#amount').value||'0'); if(!isFinite(a)||a<=0){alert('金額需為正數');return;}
+  const e={id:++m.counter,type:$('#type').value,amount:a,cat:$('#cat').value,note:($('#note').value||'').trim(),ts:Date.now()};
+  m.entries.push(e);save();render();$('#amount').value='';$('#note').value='';resetIdle();
+ });
+ $('#btnExport').addEventListener('click',()=>{const blob=new Blob([JSON.stringify(DB,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='budget-backup.json';a.click();});
+ $('#btnLock').addEventListener('click',()=>lockApp());
+
+ // debt
+ $('#btnAddDebt').addEventListener('click',()=>{const n=$('#debtor').value.trim();const a=parseFloat($('#debtamt').value||'0');if(!n||!isFinite(a)||a<=0){alert('請輸入正確姓名與金額');return;}DB.debts.push({name:n,amount:a});$('#debtor').value='';$('#debtamt').value='';save();renderDebt();});
+ document.body.addEventListener('click',resetIdle);document.body.addEventListener('keydown',resetIdle);
+}
+
+window.addEventListener('DOMContentLoaded',()=>{
+ $('#jsStatus').textContent='JS 已啟動 ✅';
+ load(); renderCats();
+ if(supported()){ if(hasCred()) $('#btnLogin').classList.remove('hidden'); }
+ wire();
+});
 })();
 </script>
-</body>
-</html>
+</body></html>
