@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>私密記帳本 — Face ID 登入（示範）</title>
+<meta name="description" content="單檔 PWA 範例：本機儲存記帳，支援 iOS Face ID（WebAuthn/Passkey），若不支援則跳過密碼。">
+<link rel="manifest" href="manifest.json">
+<style>
+:root{--bg:#fff;--fg:#111;--muted:#666;--brand:#2563eb;--accent:#16a34a;--card:#fafafa;--border:#e6eef8}
+@media (prefers-color-scheme: dark){:root{--bg:#061022;--fg:#e6eef8;--muted:#9aa6b2;--card:#071427;--border:#0f1f2f}}
+*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans TC",Arial;color:var(--fg);background:var(--bg);line-height:1.5}
+.container{max-width:880px;margin:20px auto;padding:16px}
+.card{background:var(--card);border:1px solid var(--border);padding:12px;border-radius:12px}
+h1{margin:0 0 8px;font-size:20px}
+.small{font-size:13px;color:var(--muted)}
+.toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px}
+button{padding:8px 12px;border-radius:10px;border:1px solid var(--border);background:transparent;font-weight:600}
+button.primary{background:var(--brand);color:#fff;border-color:var(--brand)}
+button.accent{background:var(--accent);color:#001;border-color:var(--accent)}
+.badge{font-size:12px;padding:4px 8px;border-radius:999px;background:var(--border);color:var(--muted)}
+.progress{height:12px;background:var(--border);border-radius:999px;overflow:hidden;margin-top:8px}
+.progress>span{display:block;height:100%;background:var(--accent);width:0%}
+.note{font-size:13px;color:var(--muted);margin-top:8px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+input{padding:8px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--fg)}
+.table{width:100%;border-collapse:collapse;margin-top:8px}
+.table th,.table td{border-bottom:1px solid var(--border);padding:8px 6px;text-align:left}
+.smallbtn{font-size:13px;padding:6px 8px;border-radius:8px}
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="card" id="introCard">
+    <h1>部署名稱：<span id="deployName">superbike-dream</span></h1>
+    <p class="small">此示範頁會在本機使用 <strong>localStorage</strong> 儲存你的記帳資料。若你的裝置支援 WebAuthn (Passkey)，系統會使用 Face ID 或 Touch ID 做本機解鎖；若不支援，則會直接跳過密碼。</p>
+    <div class="toolbar">
+      <button id="enablePasskey" class="primary">啟用 Face ID（註冊）</button>
+      <button id="authPasskey" class="accent hidden">使用 Face ID 登入</button>
+      <button id="skipAuth" class="smallbtn">跳過密碼（直接開啟）</button>
+      <span class="right badge" id="authStatus">未註冊</span>
+    </div>
+    <p class="note">提示：要在 iPhone 上觸發 Face ID，請把此頁用 HTTPS 開啟，並把它加入主畫面（Add to Home Screen）以獲得原生體驗。</p>
+  </div>
+
+  <!-- The rest is a lightweight version of the budget app (plain, same as previous) -->
+  <div id="appRoot" class="card hidden" aria-hidden="true">
+    <h2>📒 私密記帳本（僅本機資料）</h2>
+    <div class="small">目標：<span id="targetShow">300000</span>　累積存款：<strong id="savedTotal">0</strong></div>
+    <div class="progress"><span id="bar"></span></div>
+    <div class="row" style="margin-top:12px">
+      <div>
+        <label>月份</label>
+        <input id="monthPick" type="month">
+      </div>
+      <div>
+        <label>本月起始金額</label>
+        <input id="start" type="number" inputmode="decimal" placeholder="例如 12000">
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label>類型</label>
+        <select id="type"><option value="expense">支出</option><option value="income">收入</option></select>
+      </div>
+      <div><label>金額</label><input id="amount" type="number" inputmode="decimal"></div>
+    </div>
+    <div class="row">
+      <div><input id="cat" placeholder="分類"></div>
+      <div><input id="note" placeholder="備註"></div>
+    </div>
+    <div class="toolbar"><button id="add" class="primary">加入</button><button id="export" class="smallbtn">匯出 JSON</button><button id="lockBtn" class="smallbtn">上鎖</button></div>
+    <div style="margin-top:12px"><strong>本月明細</strong><div id="listArea" class="small note"></div></div>
+  </div>
+</div>
+
+<script>
+/* Simple client-side WebAuthn registration and authentication used only as a gate for localStorage.
+   Note: For production you'd normally need server-side challenge/verification. For this local-only app,
+   we use randomly-generated challenges stored locally to call navigator.credentials.create/get and accept the result as proof. */
+
+/* Utilities */
+const $ = s => document.querySelector(s);
+function toBase64Url(buffer){
+  return btoa(String.fromCharCode(...new Uint8Array(buffer))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+}
+function fromBase64Url(b64u){
+  // pad and convert
+  b64u = b64u.replace(/-/g,'+').replace(/_/g,'/');
+  while(b64u.length % 4) b64u += '=';
+  const bin = atob(b64u);
+  const arr = new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);
+  return arr.buffer;
+}
+function rand(len=32){ const b=new Uint8Array(len); crypto.getRandomValues(b); return b.buffer; }
+
+/* App data */
+const STORAGE_KEY = 'nbudget.auth.demo.v1';
+let DB = { version:1, target:300000, months:{} };
+function saveDB(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(DB)); }
+function loadDB(){ const s=localStorage.getItem(STORAGE_KEY); if(s) try{ DB=JSON.parse(s); }catch(e){} }
+function ym(d=new Date()){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); }
+
+/* WebAuthn helpers (platform authenticator) */
+function webAuthnAvailable(){
+  return !!(window.PublicKeyCredential && navigator.credentials);
+}
+
+function hasCredential(){
+  return !!localStorage.getItem('webauthn.cred');
+}
+
+async function registerPasskey(){
+  if(!webAuthnAvailable()) throw new Error('WebAuthn not available');
+  // Create a resident credential (user handle) - user.id must be Uint8Array
+  const userId = new Uint8Array(16);
+  crypto.getRandomValues(userId);
+  const publicKey = {
+    rp: { name: "Private Budget Demo" },
+    user: { id: userId, name: "local-user", displayName: "Local User" },
+    pubKeyCredParams: [{ type: "public-key", alg: -7 }], // ECDSA w/ SHA-256
+    authenticatorSelection: { authenticatorAttachment: "platform", userVerification: "required", residentKey: "required" },
+    timeout: 60000,
+    challenge: new Uint8Array(rand(32))
+  };
+  const cred = await navigator.credentials.create({ publicKey });
+  // store credential id (base64url) and raw clientData (for demo)
+  const rawId = new Uint8Array(cred.rawId);
+  localStorage.setItem('webauthn.cred', toBase64Url(rawId));
+  // store attestation for future (not verified server-side)
+  localStorage.setItem('webauthn.att', JSON.stringify({ id: toBase64Url(rawId), date: Date.now() }));
+  return true;
+}
+
+async function authenticatePasskey(){
+  if(!webAuthnAvailable()) throw new Error('WebAuthn not available');
+  const idb64 = localStorage.getItem('webauthn.cred');
+  if(!idb64) throw new Error('尚未註冊');
+  const allow = [{ id: new Uint8Array(fromBase64Url(idb64)), type: 'public-key', transports: ['internal'] }];
+  const publicKey = { challenge: new Uint8Array(rand(32)), allowCredentials: allow, timeout:60000, userVerification:'required' };
+  const assertion = await navigator.credentials.get({ publicKey });
+  // If no exception, consider authenticated
+  return true;
+}
+
+/* UI wiring */
+async function initUI(){
+  loadDB();
+  $('#deployName').textContent = 'superbike-dream';
+  if(webAuthnAvailable()){
+    $('#enablePasskey').classList.remove('hidden');
+    $('#skipAuth').textContent = '跳過密碼（直接開啟）';
+  }else{
+    // no webauthn: hide enable and show skip by default
+    $('#enablePasskey').style.display='none';
+    $('#authStatus').textContent = '不支援 WebAuthn → 直接跳過';
+  }
+  if(hasCredential()) { $('#authStatus').textContent='已註冊 Passkey'; $('#authPasskey').classList.remove('hidden'); }
+  $('#enablePasskey').onclick = async ()=>{
+    try{
+      await registerPasskey();
+      $('#authStatus').textContent='已註冊（下次可用 Face ID）';
+      $('#authPasskey').classList.remove('hidden');
+      alert('註冊成功。未來請使用「使用 Face ID 登入」');
+    }catch(err){ console.error(err); alert('註冊失敗：'+err.message); }
+  };
+  $('#authPasskey').onclick = async ()=>{
+    try{
+      await authenticatePasskey();
+      openApp();
+    }catch(err){ console.error(err); alert('驗證失敗：'+err.message); }
+  };
+  $('#skipAuth').onclick = ()=>{ openApp(); };
+  // app buttons
+  $('#add').onclick = ()=>{
+    const month = $('#monthPick').value || ym();
+    const m = DB.months[month] = DB.months[month]||{start:0,entries:[],counter:0};
+    const a = parseFloat($('#amount').value||'0'); if(!isFinite(a)||a<=0){ alert('請輸入正確金額'); return; }
+    const e = { id: ++m.counter, type: $('#type').value, amount: a, cat: $('#cat').value.trim(), note: $('#note').value.trim(), ts: Date.now() };
+    m.entries.push(e); saveDB(); renderApp();
+    $('#amount').value=''; $('#note').value='';
+  };
+  $('#export').onclick = ()=>{
+    const blob = new Blob([JSON.stringify(DB,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='budget-backup.json'; a.click();
+  };
+  $('#lockBtn').onclick = ()=>{ lockApp(); };
+  // set defaults
+  $('#monthPick').value = ym();
+}
+
+function openApp(){
+  $('#introCard').classList.add('hidden');
+  $('#appRoot').classList.remove('hidden');
+  $('#appRoot').ariaHidden = 'false';
+  renderApp();
+}
+
+function lockApp(){
+  $('#introCard').classList.remove('hidden');
+  $('#appRoot').classList.add('hidden');
+  $('#appRoot').ariaHidden = 'true';
+}
+
+function renderApp(){
+  const month = $('#monthPick').value || ym();
+  const m = DB.months[month] || {start:0, entries:[]};
+  $('#start').value = m.start || '';
+  const income = (m.entries||[]).filter(x=>x.type==='income').reduce((s,x)=>s+x.amount,0);
+  const expense = (m.entries||[]).filter(x=>x.type==='expense').reduce((s,x)=>s+x.amount,0);
+  const bal = (m.start||0)+income-expense;
+  $('#savedTotal').textContent = (Object.keys(DB.months).reduce((s,k)=>{
+    const mm = DB.months[k]; if(!mm) return s; const inc=(mm.entries||[]).filter(x=>x.type==='income').reduce((a,b)=>a+b.amount,0);
+    const exp=(mm.entries||[]).filter(x=>x.type==='expense').reduce((a,b)=>a+b.amount,0); return s + ((mm.start||0)+inc-exp);
+  },0)).toLocaleString();
+  const pct = Math.max(0, Math.min(100, DB.target ? (parseFloat((DB.target||300000))? ( (Object.keys(DB.months).reduce((s,k)=>{
+    const mm=DB.months[k]||{entries:[]}; const inc=(mm.entries||[]).filter(x=>x.type==='income').reduce((a,b)=>a+b.amount,0);
+    const exp=(mm.entries||[]).filter(x=>x.type==='expense').reduce((a,b)=>a+b.amount,0); return s + ((mm.start||0)+inc-exp);
+  },0)) / DB.target)*100 : 0):0 ));
+  $('#bar').style.width = pct + '%';
+  $('#ratio')?.textContent = pct.toFixed(1) + '%';
+  // render list
+  const list = $('#listArea'); list.innerHTML = '';
+  (m.entries||[]).slice().reverse().forEach(e=>{
+    const d = document.createElement('div'); d.className='note'; d.textContent = `${e.type==='income'?'收入':'支出'} • ${e.cat||'(未分類)'} • ${e.amount} 元 — ${e.note||''}`;
+    const del = document.createElement('button'); del.textContent='刪除'; del.className='smallbtn'; del.style.marginLeft='8px';
+    del.onclick = ()=>{ if(confirm('刪除此筆？')){ m.entries = m.entries.filter(x=>x.id!==e.id); DB.months[month]=m; saveDB(); renderApp(); } };
+    d.appendChild(del); list.appendChild(d);
+  });
+  $('#monthPick').onchange = renderApp;
+  $('#start').onchange = ()=>{ const v=parseFloat($('#start').value||'0'); m.start=isFinite(v)?v:0; DB.months[month]=m; saveDB(); renderApp(); };
+}
+
+/* Boot */
+initUI();
+</script>
+</body>
+</html>
