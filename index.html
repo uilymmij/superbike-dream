@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>私密記帳本 — Face ID / 無密碼備援（v2）</title>
+<title>私密記帳本 — Face ID 強制登入（v3）</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#2563eb">
 <style>
@@ -34,17 +34,16 @@ input,select{padding:8px;border-radius:8px;border:1px solid var(--border);backgr
 <body>
 <div class="container">
   <div class="card" id="intro">
-    <h1>superbike-dream <span class="small">（v2）</span></h1>
+    <h1>superbike-dream <span class="small">（v3）</span></h1>
     <div class="toolbar">
       <span id="jsStatus">JS 檢查中…</span>
       <span class="badge" id="authStatus">未註冊</span>
       <button id="btnDebug" class="smallbtn">Debug：我能跳出提示嗎？</button>
     </div>
-    <p class="small">本頁使用 WebAuthn（Face ID/Touch ID）作為本機解鎖。若不支援，仍可直接使用。</p>
+    <p class="small">本頁使用 WebAuthn（Face ID/Touch ID）作為本機解鎖，必須驗證後才能進入。</p>
     <div class="toolbar">
       <button id="btnRegister" class="primary">啟用 Face ID（註冊）</button>
       <button id="btnLogin" class="accent hidden">使用 Face ID 登入</button>
-      <button id="btnSkip" class="smallbtn">跳過密碼（直接開啟）</button>
     </div>
   </div>
 
@@ -70,113 +69,97 @@ input,select{padding:8px;border-radius:8px;border:1px solid var(--border);backgr
 
 <script>
 (function(){
-  // --- JS alive banner ---
   const $ = s=>document.querySelector(s);
   const jsStatus = $('#jsStatus');
   jsStatus.textContent = 'JS 已啟動 ✅';
 
-  // --- Storage ---
-  const STORAGE_KEY = 'nbudget.v2';
-  let DB = { version:2, target:300000, months:{} };
-  function save(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(DB)); }
-  function load(){ const s=localStorage.getItem(STORAGE_KEY); if(s){ try{ DB=JSON.parse(s); }catch(e){} } }
-  function ym(d=new Date()){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); }
-  function ensureMonth(k){ if(!DB.months[k]) DB.months[k]={start:0,entries:[],counter:0}; return DB.months[k]; }
-  function statsAll(){ return Object.keys(DB.months).reduce((s,k)=>{ const m=DB.months[k]; const inc=(m.entries||[]).filter(x=>x.type==='income').reduce((a,b)=>a+b.amount,0); const exp=(m.entries||[]).filter(x=>x.type==='expense').reduce((a,b)=>a+b.amount,0); return s + ((m.start||0)+inc-exp); },0); }
+  const STORAGE_KEY='nbudget.v3';
+  let DB={version:3,target:300000,months:{}};
+  function save(){localStorage.setItem(STORAGE_KEY,JSON.stringify(DB));}
+  function load(){const s=localStorage.getItem(STORAGE_KEY);if(s){try{DB=JSON.parse(s);}catch(e){}}}
+  function ym(d=new Date()){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');}
+  function ensureMonth(k){if(!DB.months[k])DB.months[k]={start:0,entries:[],counter:0};return DB.months[k];}
+  function statsAll(){return Object.keys(DB.months).reduce((s,k)=>{const m=DB.months[k];const inc=(m.entries||[]).filter(x=>x.type==='income').reduce((a,b)=>a+b.amount,0);const exp=(m.entries||[]).filter(x=>x.type==='expense').reduce((a,b)=>a+b.amount,0);return s+((m.start||0)+inc-exp);},0);}
 
-  // --- WebAuthn helpers (client-only) ---
-  function supported(){ return !!(window.PublicKeyCredential && navigator.credentials); }
-  function hasCred(){ return !!localStorage.getItem('webauthn.cred'); }
-  function toB64U(buf){ return btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); }
-  function fromB64U(s){ s=s.replace(/-/g,'+').replace(/_/g,'/'); while(s.length%4)s+='='; const b=atob(s); const a=new Uint8Array(b.length); for(let i=0;i<b.length;i++)a[i]=b.charCodeAt(i); return a.buffer; }
-  function rnd(n=32){ const b=new Uint8Array(n); crypto.getRandomValues(b); return b.buffer; }
+  function supported(){return !!(window.PublicKeyCredential&&navigator.credentials);}
+  function hasCred(){return !!localStorage.getItem('webauthn.cred');}
+  function toB64U(buf){return btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');}
+  function fromB64U(s){s=s.replace(/-/g,'+').replace(/_/g,'/');while(s.length%4)s+='=';const b=atob(s);const a=new Uint8Array(b.length);for(let i=0;i<b.length;i++)a[i]=b.charCodeAt(i);return a.buffer;}
+  function rnd(n=32){const b=new Uint8Array(n);crypto.getRandomValues(b);return b.buffer;}
 
   async function register(){
-    if(!supported()) throw new Error('此裝置不支援 WebAuthn');
-    const userId=new Uint8Array(16); crypto.getRandomValues(userId);
-    const publicKey={ rp:{name:'PrivateBudget'}, user:{id:userId,name:'local-user',displayName:'Local User'}, pubKeyCredParams:[{type:'public-key',alg:-7}], authenticatorSelection:{authenticatorAttachment:'platform',userVerification:'required',residentKey:'required'}, timeout:60000, challenge:new Uint8Array(rnd(32)) };
+    if(!supported())throw new Error('此裝置不支援 WebAuthn');
+    const userId=new Uint8Array(16);crypto.getRandomValues(userId);
+    const publicKey={rp:{name:'PrivateBudget'},user:{id:userId,name:'local-user',displayName:'Local User'},pubKeyCredParams:[{type:'public-key',alg:-7}],authenticatorSelection:{authenticatorAttachment:'platform',userVerification:'required',residentKey:'required'},timeout:60000,challenge:new Uint8Array(rnd(32))};
     const cred=await navigator.credentials.create({publicKey});
     const rawId=new Uint8Array(cred.rawId);
-    localStorage.setItem('webauthn.cred', toB64U(rawId));
+    localStorage.setItem('webauthn.cred',toB64U(rawId));
     return true;
   }
   async function login(){
-    if(!supported()) throw new Error('此裝置不支援 WebAuthn');
-    const idb64=localStorage.getItem('webauthn.cred'); if(!idb64) throw new Error('尚未註冊');
-    const allow=[{id:new Uint8Array(fromB64U(idb64)), type:'public-key', transports:['internal']}];
-    const publicKey={ challenge:new Uint8Array(rnd(32)), allowCredentials:allow, timeout:60000, userVerification:'required' };
+    if(!supported())throw new Error('此裝置不支援 WebAuthn');
+    const idb64=localStorage.getItem('webauthn.cred');if(!idb64)throw new Error('尚未註冊');
+    const allow=[{id:new Uint8Array(fromB64U(idb64)),type:'public-key',transports:['internal']}];
+    const publicKey={challenge:new Uint8Array(rnd(32)),allowCredentials:allow,timeout:60000,userVerification:'required'};
     await navigator.credentials.get({publicKey});
     return true;
   }
 
-  // --- App render ---
   function render(){
-    $('#targetShow').textContent = DB.target;
-    const total = statsAll();
-    $('#savedTotal').textContent = total.toLocaleString();
-    const pct = Math.max(0, Math.min(100, DB.target? (total/DB.target*100):0));
-    $('#bar').style.width = pct + '%';
-
-    const mkey = $('#monthPick').value || ym();
-    $('#monthPick').value = mkey;
-    const m = ensureMonth(mkey);
-    $('#start').value = m.start || '';
-    const inc=(m.entries||[]).filter(x=>x.type==='income').reduce((a,b)=>a+b.amount,0);
-    const exp=(m.entries||[]).filter(x=>x.type==='expense').reduce((a,b)=>a+b.amount,0);
-    const bal=(m.start||0)+inc-exp;
-    const list=$('#listArea'); list.innerHTML='';
+    $('#targetShow').textContent=DB.target;
+    const total=statsAll();
+    $('#savedTotal').textContent=total.toLocaleString();
+    const pct=Math.max(0,Math.min(100,DB.target?(total/DB.target*100):0));
+    $('#bar').style.width=pct+'%';
+    const mkey=$('#monthPick').value||ym();
+    $('#monthPick').value=mkey;
+    const m=ensureMonth(mkey);
+    $('#start').value=m.start||'';
+    const list=$('#listArea');list.innerHTML='';
     (m.entries||[]).slice().reverse().forEach(e=>{
-      const div=document.createElement('div'); div.textContent = `${e.type==='income'?'收入':'支出'} · ${e.cat||'(未分類)'} · ${e.amount} — ${e.note||''}`;
+      const div=document.createElement('div');
+      div.textContent=`${e.type==='income'?'收入':'支出'} · ${e.cat||'(未分類)'} · ${e.amount} — ${e.note||''}`;
       list.appendChild(div);
     });
   }
+  function openApp(){ $('#intro').classList.add('hidden'); $('#app').classList.remove('hidden'); $('#app').ariaHidden='false'; render(); resetIdleTimer(); }
+  function lockApp(){ $('#intro').classList.remove('hidden'); $('#app').classList.add('hidden'); $('#app').ariaHidden='true'; clearTimeout(idleTimer); }
 
-  function openApp(){ $('#intro').classList.add('hidden'); $('#app').classList.remove('hidden'); $('#app').ariaHidden='false'; render(); }
-  function lockApp(){ $('#intro').classList.remove('hidden'); $('#app').classList.add('hidden'); $('#app').ariaHidden='true'; }
+  let idleTimer=null;
+  function resetIdleTimer(){ clearTimeout(idleTimer); idleTimer=setTimeout(()=>{alert('閒置超過 3 分鐘，已自動上鎖'); lockApp();},3*60*1000); }
 
-  // --- Wire events safely ---
-  window.addEventListener('DOMContentLoaded', function(){
-    // JS OK banner update
-    jsStatus.textContent = 'JS 執行中（可互動） ✅';
-
-    // Load DB
+  window.addEventListener('DOMContentLoaded',function(){
+    jsStatus.textContent='JS 執行中（可互動） ✅';
     load();
 
-    // Debug button
-    $('#btnDebug').addEventListener('click', function(){ alert('JS 正常，按鈕有反應 ✅'); });
+    $('#btnDebug').addEventListener('click',()=>alert('JS 正常，按鈕有反應 ✅'));
 
-    // Auth buttons
-    if(supported()){ $('#authStatus').textContent = hasCred() ? '已註冊 Passkey' : '可用：Face ID/Touch ID'; }
-    else { $('#authStatus').textContent='此裝置不支援 WebAuthn（可直接使用）'; }
+    if(supported()){ $('#authStatus').textContent=hasCred()?'已註冊 Passkey':'可用：Face ID/Touch ID'; }
+    else { $('#authStatus').textContent='此裝置不支援 WebAuthn'; }
 
-    $('#btnRegister').addEventListener('click', async function(){
-      try{ await register(); $('#authStatus').textContent='註冊成功'; $('#btnLogin').classList.remove('hidden'); alert('已啟用 Face ID，之後使用「使用 Face ID 登入」。'); }
-      catch(e){ alert('註冊失敗：'+ e.message); }
-    });
+    $('#btnRegister').addEventListener('click',async()=>{
+      try{await register();$('#authStatus').textContent='註冊成功';$('#btnLogin').classList.remove('hidden');alert('已啟用 Face ID，請改用「使用 Face ID 登入」。');}
+      catch(e){alert('註冊失敗：'+e.message);} });
 
-    $('#btnLogin').addEventListener('click', async function(){
-      try{ await login(); openApp(); } catch(e){ alert('驗證失敗：'+ e.message); }
-    });
+    $('#btnLogin').addEventListener('click',async()=>{
+      try{await login();openApp();}catch(e){alert('驗證失敗：'+e.message);} });
 
-    $('#btnSkip').addEventListener('click', function(){ openApp(); });
-
-    // App interactions
-    $('#monthPick').value = ym();
-    $('#monthPick').addEventListener('change', render);
-    $('#start').addEventListener('change', function(){
-      const v=parseFloat($('#start').value||'0'); const m=ensureMonth($('#monthPick').value||ym()); m.start=isFinite(v)?v:0; save(); render();
-    });
-    $('#btnAdd').addEventListener('click', function(){
+    $('#monthPick').value=ym();
+    $('#monthPick').addEventListener('change',()=>{render();resetIdleTimer();});
+    $('#start').addEventListener('change',()=>{const v=parseFloat($('#start').value||'0');const m=ensureMonth($('#monthPick').value||ym());m.start=isFinite(v)?v:0;save();render();resetIdleTimer();});
+    $('#btnAdd').addEventListener('click',()=>{
       const m=ensureMonth($('#monthPick').value||ym());
-      const a=parseFloat($('#amount').value||'0'); if(!isFinite(a)||a<=0){ alert('金額需為正數'); return; }
-      const e={ id:++m.counter, type:$('#type').value, amount:a, cat:($('#cat').value||'').trim(), note:($('#note').value||'').trim(), ts: Date.now() };
-      m.entries.push(e); save(); render(); $('#amount').value=''; $('#note').value='';
+      const a=parseFloat($('#amount').value||'0');if(!isFinite(a)||a<=0){alert('金額需為正數');return;}
+      const e={id:++m.counter,type:$('#type').value,amount:a,cat:($('#cat').value||'').trim(),note:($('#note').value||'').trim(),ts:Date.now()};
+      m.entries.push(e);save();render();$('#amount').value='';$('#note').value='';resetIdleTimer();
     });
-    $('#btnExport').addEventListener('click', function(){
+    $('#btnExport').addEventListener('click',()=>{
       const blob=new Blob([JSON.stringify(DB,null,2)],{type:'application/json'});
-      const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='budget-backup.json'; a.click();
+      const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='budget-backup.json';a.click();resetIdleTimer();
     });
-    $('#btnLock').addEventListener('click', function(){ lockApp(); });
+    $('#btnLock').addEventListener('click',()=>{lockApp();});
+    document.body.addEventListener('click',resetIdleTimer);
+    document.body.addEventListener('keydown',resetIdleTimer);
   });
 })();
 </script>
